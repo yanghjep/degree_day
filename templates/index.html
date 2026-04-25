@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>적산온도 계산기</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif; }
+    .fade-in { animation: fadeIn 0.4s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    select option { padding: 4px; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-green-50 to-emerald-100 min-h-screen">
+
+  <div class="max-w-4xl mx-auto px-4 py-10">
+
+    <!-- Header -->
+    <header class="text-center mb-8">
+      <div class="text-5xl mb-3">🌸</div>
+      <h1 class="text-3xl font-bold text-green-800 mb-1">적산온도 계산기</h1>
+      <p class="text-green-700 text-sm">만개일부터 가까운 기상관측지점의 일평균기온(기준 0 ℃)을 누적합니다</p>
+    </header>
+
+    <!-- Input Card -->
+    <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+      <h2 class="text-base font-semibold text-gray-700 mb-4">입력 정보</h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Date -->
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1">만개일 <span class="text-red-400">*</span></label>
+          <input type="date" id="startDate"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800" />
+        </div>
+
+        <!-- Base temp -->
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1">기준온도 (℃)</label>
+          <input type="number" id="baseTemp" value="0" step="0.5"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800" />
+        </div>
+
+        <!-- Station -->
+        <div class="md:col-span-2">
+          <label class="block text-sm font-medium text-gray-600 mb-1">기상관측지점 <span class="text-red-400">*</span></label>
+          <div class="flex gap-2">
+            <select id="stationSelect"
+                    class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400 text-gray-800">
+              <option value="">지점 선택...</option>
+            </select>
+            <button id="geoBtn"
+                    class="px-4 py-2 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white rounded-lg transition text-sm font-medium whitespace-nowrap">
+              📍 내 위치
+            </button>
+          </div>
+          <p id="nearestInfo" class="text-xs text-blue-600 mt-1 hidden"></p>
+        </div>
+      </div>
+
+      <button id="calcBtn"
+              class="mt-5 w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold py-3 rounded-xl transition text-base">
+        계산하기
+      </button>
+    </div>
+
+    <!-- API key notice -->
+    <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
+      <strong>API 키 필요</strong>
+      <a href="https://www.data.go.kr/data/15001985/openapi.do" target="_blank"
+         class="underline ml-1">공공데이터포털</a>에서
+      <em>기상청 지상(종관,ASOS) 일자료 조회서비스</em> API 키를 발급 받아
+      <code class="bg-amber-100 px-1 rounded">.env</code> 파일에
+      <code class="bg-amber-100 px-1 rounded">KMA_API_KEY=발급키</code>로 설정하세요.
+    </div>
+
+    <!-- Error -->
+    <div id="errorMsg" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-6 fade-in"></div>
+
+    <!-- Loading -->
+    <div id="loadingMsg" class="hidden text-center text-green-700 py-10 fade-in">
+      <div class="text-4xl mb-2 animate-spin inline-block">⟳</div>
+      <p>기상 데이터를 불러오는 중...</p>
+    </div>
+
+    <!-- Results -->
+    <div id="results" class="hidden fade-in">
+
+      <!-- Summary row -->
+      <div class="grid grid-cols-3 gap-3 mb-6">
+        <div class="bg-white rounded-2xl shadow p-4 text-center">
+          <p class="text-xs text-gray-500 mb-1">관측 일수</p>
+          <p id="sumDays" class="text-2xl font-bold text-green-700">-</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4 text-center">
+          <p class="text-xs text-gray-500 mb-1">누적 적산온도</p>
+          <p id="sumTotal" class="text-2xl font-bold text-green-700">-</p>
+        </div>
+        <div class="bg-white rounded-2xl shadow p-4 text-center">
+          <p class="text-xs text-gray-500 mb-1">관측지점</p>
+          <p id="sumStation" class="text-2xl font-bold text-green-700">-</p>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+        <h2 class="text-base font-semibold text-gray-700 mb-4">적산온도 누적 그래프</h2>
+        <canvas id="chart"></canvas>
+      </div>
+
+      <!-- Table -->
+      <div class="bg-white rounded-2xl shadow-lg p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-base font-semibold text-gray-700">일별 상세 데이터</h2>
+          <button id="exportBtn"
+                  class="text-sm px-3 py-1 border border-green-500 text-green-600 rounded-lg hover:bg-green-50 transition">
+            CSV 내보내기
+          </button>
+        </div>
+        <div class="overflow-x-auto max-h-96 overflow-y-auto">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-gray-50">
+              <tr class="text-gray-500">
+                <th class="px-3 py-2 text-left font-medium">날짜</th>
+                <th class="px-3 py-2 text-right font-medium">일평균기온 (℃)</th>
+                <th class="px-3 py-2 text-right font-medium">당일 DD</th>
+                <th class="px-3 py-2 text-right font-medium">누적 적산온도</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /container -->
+
+<script>
+// ── Station data ──────────────────────────────────────────────────────────────
+const STATIONS = [
+  {id:"90",  name:"속초",   lat:38.2508, lon:128.5647},
+  {id:"95",  name:"강릉",   lat:37.7514, lon:128.8908},
+  {id:"98",  name:"동해",   lat:37.5092, lon:129.1242},
+  {id:"99",  name:"태백",   lat:37.1678, lon:128.9883},
+  {id:"101", name:"추풍령", lat:36.2197, lon:127.9944},
+  {id:"102", name:"안동",   lat:36.5728, lon:128.7081},
+  {id:"105", name:"대전",   lat:36.3720, lon:127.3742},
+  {id:"108", name:"서울",   lat:37.5714, lon:126.9658},
+  {id:"112", name:"인천",   lat:37.4775, lon:126.6247},
+  {id:"114", name:"원주",   lat:37.3381, lon:127.9464},
+  {id:"115", name:"울릉도", lat:37.4797, lon:130.8981},
+  {id:"119", name:"수원",   lat:37.2683, lon:126.9881},
+  {id:"121", name:"영월",   lat:37.1814, lon:128.4617},
+  {id:"127", name:"충주",   lat:36.9681, lon:127.9531},
+  {id:"129", name:"서산",   lat:36.7739, lon:126.4936},
+  {id:"130", name:"울진",   lat:36.9917, lon:129.4122},
+  {id:"133", name:"대구",   lat:35.8853, lon:128.6197},
+  {id:"135", name:"전주",   lat:35.8408, lon:127.1192},
+  {id:"136", name:"광주",   lat:35.1714, lon:126.8914},
+  {id:"137", name:"여수",   lat:34.7375, lon:127.7442},
+  {id:"140", name:"군산",   lat:35.9736, lon:126.7161},
+  {id:"146", name:"진주",   lat:35.1581, lon:128.0400},
+  {id:"152", name:"울산",   lat:35.5617, lon:129.3189},
+  {id:"159", name:"부산",   lat:35.1044, lon:129.0322},
+  {id:"162", name:"통영",   lat:34.8458, lon:128.4353},
+  {id:"165", name:"목포",   lat:34.8158, lon:126.3814},
+  {id:"170", name:"완도",   lat:34.3939, lon:126.7553},
+  {id:"184", name:"제주",   lat:33.5147, lon:126.5294},
+  {id:"185", name:"고산",   lat:33.2936, lon:126.1628},
+  {id:"188", name:"성산",   lat:33.3869, lon:126.8803},
+  {id:"189", name:"서귀포", lat:33.2461, lon:126.5664},
+  {id:"192", name:"진도",   lat:34.4864, lon:126.3397},
+  {id:"201", name:"강화",   lat:37.7139, lon:126.4817},
+  {id:"202", name:"양평",   lat:37.4903, lon:127.4942},
+  {id:"203", name:"이천",   lat:37.2633, lon:127.4853},
+  {id:"211", name:"인제",   lat:38.0658, lon:128.1706},
+  {id:"212", name:"홍천",   lat:37.6847, lon:127.8811},
+  {id:"221", name:"제천",   lat:37.1608, lon:128.1914},
+  {id:"226", name:"보은",   lat:36.4892, lon:127.7267},
+  {id:"232", name:"천안",   lat:36.7753, lon:127.1150},
+  {id:"235", name:"보령",   lat:36.3267, lon:126.5594},
+  {id:"236", name:"부여",   lat:36.2722, lon:126.9161},
+  {id:"238", name:"금산",   lat:36.1011, lon:127.4881},
+  {id:"243", name:"부안",   lat:35.7308, lon:126.7228},
+  {id:"245", name:"임실",   lat:35.6131, lon:127.2864},
+  {id:"247", name:"남원",   lat:35.4147, lon:127.3342},
+  {id:"248", name:"장수",   lat:35.6481, lon:127.5217},
+  {id:"256", name:"고창",   lat:35.4250, lon:126.7022},
+  {id:"260", name:"광양",   lat:34.9444, lon:127.6950},
+  {id:"261", name:"장흥",   lat:34.6833, lon:126.9078},
+  {id:"262", name:"해남",   lat:34.5508, lon:126.5700},
+  {id:"263", name:"고흥",   lat:34.6197, lon:127.2756},
+  {id:"264", name:"보성",   lat:34.7714, lon:127.0756},
+  {id:"271", name:"봉화",   lat:36.9400, lon:128.9189},
+  {id:"272", name:"영주",   lat:36.8717, lon:128.5172},
+  {id:"273", name:"문경",   lat:36.6261, lon:128.1494},
+  {id:"277", name:"영덕",   lat:36.5331, lon:129.4028},
+  {id:"278", name:"의성",   lat:36.3556, lon:128.6950},
+  {id:"279", name:"구미",   lat:36.1297, lon:128.3192},
+  {id:"281", name:"영천",   lat:35.9736, lon:128.9514},
+  {id:"283", name:"경주",   lat:35.8406, lon:129.2136},
+  {id:"284", name:"거창",   lat:35.6817, lon:127.9092},
+  {id:"285", name:"합천",   lat:35.5644, lon:128.1644},
+  {id:"288", name:"밀양",   lat:35.4911, lon:128.7458},
+  {id:"289", name:"산청",   lat:35.4097, lon:127.8742},
+  {id:"294", name:"거제",   lat:34.8831, lon:128.6194},
+  {id:"295", name:"남해",   lat:34.8347, lon:127.8969},
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371, toR = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toR, dLon = (lon2 - lon1) * toR;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function findNearest(lat, lon) {
+  let best = null, minD = Infinity;
+  for (const s of STATIONS) {
+    const d = haversine(lat, lon, s.lat, s.lon);
+    if (d < minD) { minD = d; best = s; }
+  }
+  return { station: best, dist: Math.round(minD) };
+}
+
+// ── Populate select ───────────────────────────────────────────────────────────
+const stationSelect = document.getElementById('stationSelect');
+const sorted = [...STATIONS].sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+for (const s of sorted) {
+  const opt = document.createElement('option');
+  opt.value = s.id;
+  opt.textContent = `${s.name} (${s.id})`;
+  stationSelect.appendChild(opt);
+}
+
+// Set max date to today
+document.getElementById('startDate').max = new Date().toISOString().slice(0, 10);
+
+// ── Geolocation ───────────────────────────────────────────────────────────────
+document.getElementById('geoBtn').addEventListener('click', () => {
+  if (!navigator.geolocation) { alert('브라우저가 위치 정보를 지원하지 않습니다.'); return; }
+  const btn = document.getElementById('geoBtn');
+  btn.textContent = '탐색 중...';
+  btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    ({ coords: { latitude, longitude } }) => {
+      const { station, dist } = findNearest(latitude, longitude);
+      stationSelect.value = station.id;
+      const info = document.getElementById('nearestInfo');
+      info.textContent = `현재 위치에서 가장 가까운 지점: ${station.name} (약 ${dist} km)`;
+      info.classList.remove('hidden');
+      btn.textContent = '📍 내 위치';
+      btn.disabled = false;
+    },
+    (err) => {
+      alert('위치 정보를 가져올 수 없습니다: ' + err.message);
+      btn.textContent = '📍 내 위치';
+      btn.disabled = false;
+    }
+  );
+});
+
+// ── Chart instance ────────────────────────────────────────────────────────────
+let chartInstance = null;
+
+// ── Calculate ─────────────────────────────────────────────────────────────────
+document.getElementById('calcBtn').addEventListener('click', async () => {
+  const startDate = document.getElementById('startDate').value;
+  const stationId = stationSelect.value;
+  const baseTemp  = parseFloat(document.getElementById('baseTemp').value) || 0;
+
+  if (!startDate) { showError('만개일을 입력해주세요.'); return; }
+  if (!stationId) { showError('기상관측지점을 선택해주세요.'); return; }
+
+  hideError();
+  setLoading(true);
+  document.getElementById('results').classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/degree-days', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startDate, stationId, baseTemp }),
+    });
+    const json = await res.json();
+
+    if (!res.ok || json.error) { showError(json.error || '오류가 발생했습니다.'); return; }
+    if (!json.data || json.data.length === 0) { showError('해당 기간의 데이터가 없습니다.'); return; }
+
+    renderResults(json.data, stationId);
+  } catch (e) {
+    showError('서버 연결 실패: ' + e.message);
+  } finally {
+    setLoading(false);
+  }
+});
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+let cachedData = [];
+
+function renderResults(data, stationId) {
+  cachedData = data;
+  const station = STATIONS.find(s => s.id === stationId);
+  const stationName = station ? station.name : stationId;
+
+  // Summary
+  document.getElementById('sumDays').textContent    = data.length + ' 일';
+  document.getElementById('sumTotal').textContent   = data[data.length-1].cumulative + ' ℃';
+  document.getElementById('sumStation').textContent = stationName;
+
+  // Chart
+  const labels     = data.map(d => d.date);
+  const cumulative = data.map(d => d.cumulative);
+  const avgTemps   = data.map(d => d.avgTemp);
+
+  if (chartInstance) chartInstance.destroy();
+  chartInstance = new Chart(document.getElementById('chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '누적 적산온도 (℃)',
+          data: cumulative,
+          borderColor: '#16a34a',
+          backgroundColor: 'rgba(22,163,74,0.12)',
+          fill: true,
+          tension: 0.35,
+          pointRadius: data.length > 60 ? 0 : 3,
+          yAxisID: 'y1',
+        },
+        {
+          label: '일평균기온 (℃)',
+          data: avgTemps,
+          borderColor: '#f59e0b',
+          borderDash: [5, 4],
+          tension: 0.35,
+          pointRadius: 0,
+          fill: false,
+          yAxisID: 'y2',
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: {
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y} ℃` },
+        },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, maxRotation: 45 } },
+        y1: {
+          type: 'linear', position: 'left',
+          title: { display: true, text: '누적 적산온도 (℃)' },
+          grid: { color: 'rgba(0,0,0,0.05)' },
+        },
+        y2: {
+          type: 'linear', position: 'right',
+          title: { display: true, text: '일평균기온 (℃)' },
+          grid: { drawOnChartArea: false },
+        },
+      },
+    },
+  });
+
+  // Table
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  for (const row of data) {
+    const tr = document.createElement('tr');
+    const valid = row.avgTemp !== null && row.avgTemp !== undefined;
+    const tempColor = valid && row.avgTemp > 0 ? 'text-orange-600' : 'text-blue-600';
+    tr.innerHTML = `
+      <td class="px-3 py-2 text-gray-700">${row.date}</td>
+      <td class="px-3 py-2 text-right ${tempColor}">${valid ? row.avgTemp.toFixed(1) : '-'}</td>
+      <td class="px-3 py-2 text-right text-green-700">${row.degreeDay}</td>
+      <td class="px-3 py-2 text-right font-semibold text-green-800">${row.cumulative}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('results').classList.remove('hidden');
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+document.getElementById('exportBtn').addEventListener('click', () => {
+  if (!cachedData.length) return;
+  const header = '날짜,일평균기온(℃),당일DD,누적적산온도\n';
+  const rows = cachedData.map(r =>
+    `${r.date},${r.avgTemp ?? ''},${r.degreeDay},${r.cumulative}`
+  ).join('\n');
+  const blob = new Blob(['﻿' + header + rows], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `degree_day_${document.getElementById('startDate').value}.csv`;
+  a.click();
+});
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError() {
+  document.getElementById('errorMsg').classList.add('hidden');
+}
+function setLoading(show) {
+  document.getElementById('loadingMsg').classList.toggle('hidden', !show);
+}
+</script>
+</body>
+</html>
